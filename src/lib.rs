@@ -135,6 +135,7 @@ fn init(
 
     #[cfg(target_arch = "wasm32")]
     {
+        use wasm_bindgen::JsCast;
         use winit::platform::web::WindowAttributesExtWebSys;
         let canvas = wgpu::web_sys::window()
             .unwrap()

@@ -398,6 +398,7 @@ impl<'a> RenderContext<'a> {
 
             // Reset accumulation after resizing.
             self.scene.render_param.total_samples = 0;
+            self.scene.frame_data.index = 0;
         }
     }
 
@@ -429,6 +430,56 @@ impl<'a> RenderContext<'a> {
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // On wasm, resizing the browser window typically does NOT emit a reliable `WindowEvent::Resized`.
+        // Instead, keep the canvas backing resolution in sync with its CSS size.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::WindowExtWebSys;
+
+            let canvas = self.window.canvas().unwrap();
+
+            let css_width = canvas.client_width().max(1) as f64;
+            let css_height = canvas.client_height().max(1) as f64;
+            let dpr = web_sys::window()
+                .map(|w| w.device_pixel_ratio())
+                .unwrap_or(1.0)
+                .max(1.0);
+
+            let new_width = (css_width * dpr).round().max(1.0) as u32;
+            let new_height = (css_height * dpr).round().max(1.0) as u32;
+
+            if canvas.width() != new_width || canvas.height() != new_height {
+                canvas.set_width(new_width);
+                canvas.set_height(new_height);
+                self.resize(winit::dpi::PhysicalSize::new(new_width, new_height));
+            }
+        }
+
+        {
+            let camera = GpuCamera::new(&self.scene.camera, (self.size.width, self.size.height));
+
+            self.queue
+                .write_buffer(&self.camera_buffer.handle(), 0, bytemuck::bytes_of(&camera));
+
+            self.scene.frame_data.width = self.size.width;
+            self.scene.frame_data.height = self.size.height;
+            self.scene.frame_data.index += 1;
+
+            self.queue.write_buffer(
+                &self.frame_data_buffer.handle(),
+                0,
+                bytemuck::bytes_of(&self.scene.frame_data),
+            );
+
+            self.scene.render_param.update();
+
+            self.queue.write_buffer(
+                &self.render_param_buffer.handle(),
+                0,
+                bytemuck::bytes_of(&self.scene.render_param),
+            );
+        }
+
         let output = self.surface.get_current_texture()?;
 
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -475,31 +526,6 @@ impl<'a> RenderContext<'a> {
             render_pass.set_bind_group(1, &self.scene_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..VERTICES_LEN as u32, 0..1);
-        }
-
-        {
-            let camera = GpuCamera::new(&self.scene.camera, (self.size.width, self.size.height));
-
-            self.queue
-                .write_buffer(&self.camera_buffer.handle(), 0, bytemuck::bytes_of(&camera));
-
-            self.scene.frame_data.width = self.size.width;
-            self.scene.frame_data.height = self.size.height;
-            self.scene.frame_data.index += 1;
-
-            self.queue.write_buffer(
-                &self.frame_data_buffer.handle(),
-                0,
-                bytemuck::bytes_of(&self.scene.frame_data),
-            );
-
-            self.scene.render_param.update();
-
-            self.queue.write_buffer(
-                &self.render_param_buffer.handle(),
-                0,
-                bytemuck::bytes_of(&self.scene.render_param),
-            );
         }
 
         {

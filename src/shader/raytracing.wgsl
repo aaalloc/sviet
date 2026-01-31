@@ -41,10 +41,11 @@ fn vs_main(
 fn apply_transfer_function(x: f32) -> u32 {
     let a = 0.055;
     var y: f32;
-    if x > 0.0031308 {
-        y = (1.0 + a) * pow(x, 1.0 / 2.4) - a;
+    let xc = clamp(x, 0.0, 1.0);
+    if xc > 0.0031308 {
+        y = (1.0 + a) * pow(xc, 1.0 / 2.4) - a;
     } else {
-        y = 12.92 * x;
+        y = 12.92 * xc;
     }
     return u32(round(y * 255.0));
 }
@@ -60,11 +61,12 @@ fn from_linear_rgb(c: vec3<f32>) -> vec3<f32> {
 // for webgpu
 @fragment
 fn fs_main_rgb(in: VertexOutput) -> @location(0) vec4<f32> {
-    let u = in.tex_coords.x;
-    let v = in.tex_coords.y;
+    // Clamp to avoid the last pixel hitting exactly `width`/`height` due to interpolation.
+    let u = clamp(in.tex_coords.x, 0.0, 0.99999994);
+    let v = clamp(in.tex_coords.y, 0.0, 0.99999994);
 
-    let x = u32(u * f32(frame_data.width));
-    let y = u32(v * f32(frame_data.height));
+    let x = min(u32(u * f32(frame_data.width)), frame_data.width - 1u);
+    let y = min(u32(v * f32(frame_data.height)), frame_data.height - 1u);
     let i = y * frame_data.width + x;
 
     var rngState: u32 = init_rng(
@@ -73,22 +75,22 @@ fn fs_main_rgb(in: VertexOutput) -> @location(0) vec4<f32> {
         frame_data.frame_idx
     );
 
+    // Accumulate in linear space in the storage buffer.
     var pixel = vec3(image_buffer[i][0], image_buffer[i][1], image_buffer[i][2]);
 
     if render_param.clear_samples == 1u {
         pixel = vec3(0.0);
     }
 
-    var rgb = sample_pixel(&rngState, f32(x), f32(y));
-    rgb = from_linear_rgb(rgb);
-
+    let rgb = sample_pixel(&rngState, f32(x), f32(y));
     pixel += rgb;
     image_buffer[i] = array<f32, 3>(pixel.r, pixel.g, pixel.b);
 
-    return vec4<f32>(
-        pixel / f32(render_param.total_samples),
-        1.0
-    );
+    // Avoid divide-by-zero if uniforms are ever out of sync.
+    let denom = max(1.0, f32(render_param.total_samples));
+    let linear_out = pixel / denom;
+    let srgb_out = from_linear_rgb(linear_out);
+    return vec4<f32>(srgb_out, 1.0);
 
     // var noiseState: u32 = init_rng(vec2<u32>(u32(u), u32(v)), vec2<u32>(512u, 512u), 0u);
     // return vec4<f32>(rng_next_float(&rngState), rng_next_float(&rngState), rng_next_float(&rngState), 1.0);
