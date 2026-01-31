@@ -164,7 +164,7 @@ pub async fn run() {
     let mut state = State {
         window: &window,
         mouse_pressed: false,
-        surface_configured: false,
+        surface_configured: true,
         last_time: instant::Instant::now(),
         render_context: RenderContext::new(
             &window,

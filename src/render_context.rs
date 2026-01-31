@@ -19,7 +19,9 @@ pub struct RenderContext<'a> {
     window: &'a Window,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+    image_bind_group_layout: wgpu::BindGroupLayout,
     image_bind_group: wgpu::BindGroup,
+    image_buffer: StorageBuffer,
     camera_buffer: UniformBuffer,
     render_param_buffer: UniformBuffer,
     frame_data_buffer: UniformBuffer,
@@ -62,7 +64,18 @@ impl<'a> RenderContext<'a> {
             if #[cfg(target_arch = "wasm32")] {
                 use winit::platform::web::WindowExtWebSys;
                 let canvas = window.canvas().unwrap();
-                size = winit::dpi::PhysicalSize::new(canvas.client_width() as u32, canvas.client_height() as u32);
+                // On the web, `client_width/height` can be 0 during early layout.
+                // Fall back to the canvas intrinsic size and clamp to >= 1.
+                let mut width = canvas.client_width().max(0) as u32;
+                let mut height = canvas.client_height().max(0) as u32;
+                if width == 0 || height == 0 {
+                    width = canvas.width();
+                    height = canvas.height();
+                }
+                width = width.max(1);
+                height = height.max(1);
+
+                size = winit::dpi::PhysicalSize::new(width, height);
             } else {
                 size = window.inner_size();
             }
@@ -140,41 +153,37 @@ impl<'a> RenderContext<'a> {
                 Some("render param buffer"),
             )
         };
-        let (image_bind_group, image_bind_group_layout) = {
-            let image_buffer = {
-                let buffer = vec![[0_f32; 3]; size.width as usize * size.height as usize];
-                StorageBuffer::new_from_bytes(
-                    &device,
-                    bytemuck::cast_slice(buffer.as_slice()),
-                    3_u32,
-                    Some("image buffer"),
-                )
-            };
+        let image_buffer = {
+            let buffer = vec![[0_f32; 3]; size.width as usize * size.height as usize];
+            StorageBuffer::new_from_bytes(
+                &device,
+                bytemuck::cast_slice(buffer.as_slice()),
+                3_u32,
+                Some("image buffer"),
+            )
+        };
 
-            let image_bind_group_layout =
-                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    entries: &[
-                        camera_buffer.layout(wgpu::ShaderStages::FRAGMENT),
-                        frame_data_buffer.layout(wgpu::ShaderStages::FRAGMENT),
-                        render_param_buffer.layout(wgpu::ShaderStages::FRAGMENT),
-                        image_buffer.layout(wgpu::ShaderStages::FRAGMENT, false),
-                    ],
-                    label: Some("image layout"),
-                });
-
-            let image_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &image_bind_group_layout,
+        let image_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
-                    camera_buffer.binding(),
-                    frame_data_buffer.binding(),
-                    render_param_buffer.binding(),
-                    image_buffer.binding(),
+                    camera_buffer.layout(wgpu::ShaderStages::FRAGMENT),
+                    frame_data_buffer.layout(wgpu::ShaderStages::FRAGMENT),
+                    render_param_buffer.layout(wgpu::ShaderStages::FRAGMENT),
+                    image_buffer.layout(wgpu::ShaderStages::FRAGMENT, false),
                 ],
-                label: Some("image bind group"),
+                label: Some("image layout"),
             });
 
-            (image_bind_group, image_bind_group_layout)
-        };
+        let image_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &image_bind_group_layout,
+            entries: &[
+                camera_buffer.binding(),
+                frame_data_buffer.binding(),
+                render_param_buffer.binding(),
+                image_buffer.binding(),
+            ],
+            label: Some("image bind group"),
+        });
 
         let (scene_bind_group_layout, scene_bind_group) = {
             let objects_buffer = StorageBuffer::new_from_bytes(
@@ -273,6 +282,9 @@ impl<'a> RenderContext<'a> {
             desired_maximum_frame_latency: 2,
         };
 
+        // Configure once at startup. On wasm, you may never get an initial `Resized` event.
+        surface.configure(&device, &config);
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -342,7 +354,9 @@ impl<'a> RenderContext<'a> {
             window,
             render_pipeline,
             vertex_buffer,
+            image_bind_group_layout,
             image_bind_group,
+            image_buffer,
             camera_buffer,
             frame_data_buffer,
             render_param_buffer,
@@ -360,6 +374,30 @@ impl<'a> RenderContext<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+
+            // The raytracer stores the image in a storage buffer sized to width*height.
+            // When resizing, we must recreate that buffer (otherwise the shader indexes OOB).
+            let buffer = vec![[0_f32; 3]; new_size.width as usize * new_size.height as usize];
+            self.image_buffer = StorageBuffer::new_from_bytes(
+                &self.device,
+                bytemuck::cast_slice(buffer.as_slice()),
+                3_u32,
+                Some("image buffer"),
+            );
+
+            self.image_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.image_bind_group_layout,
+                entries: &[
+                    self.camera_buffer.binding(),
+                    self.frame_data_buffer.binding(),
+                    self.render_param_buffer.binding(),
+                    self.image_buffer.binding(),
+                ],
+                label: Some("image bind group"),
+            });
+
+            // Reset accumulation after resizing.
+            self.scene.render_param.total_samples = 0;
         }
     }
 
