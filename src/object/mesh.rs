@@ -1,3 +1,5 @@
+use glm::Vec3;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 // TODO: For the moment, vec4 for padding, include manually
@@ -187,6 +189,37 @@ impl Mesh {
     }
 }
 
+pub fn center_surface(meshes: &Vec<Mesh>) -> Vec3 {
+    let mut min = glm::vec3(f32::MAX, f32::MAX, f32::MAX);
+    let mut max = glm::vec3(f32::MIN, f32::MIN, f32::MIN);
+    for mesh in meshes.iter() {
+        for vertex in mesh.vertices.iter() {
+            min.x = min.x.min(vertex.x);
+            min.y = min.y.min(vertex.y);
+            min.z = min.z.min(vertex.z);
+            max.x = max.x.max(vertex.x);
+            max.y = max.y.max(vertex.y);
+            max.z = max.z.max(vertex.z);
+        }
+    }
+    let center = (min + max) / 2.0;
+    center
+}
+
+pub fn area(meshes: &Vec<Mesh>) -> f32 {
+    let mut area = 0.0;
+    for mesh in meshes.iter() {
+        let a = glm::vec3(mesh.vertices[0].x, mesh.vertices[0].y, mesh.vertices[0].z);
+        let b = glm::vec3(mesh.vertices[1].x, mesh.vertices[1].y, mesh.vertices[1].z);
+        let c = glm::vec3(mesh.vertices[2].x, mesh.vertices[2].y, mesh.vertices[2].z);
+        let ab = b - a;
+        let ac = c - a;
+        let cross = glm::cross(&ab, &ac);
+        area += glm::length(&cross) / 2.0;
+    }
+    area
+}
+
 pub fn rotate(meshes: &mut Vec<Mesh>, angle: f32, axis: glm::Vec3) {
     // degree to radian
     let angle = angle.to_radians();
@@ -217,6 +250,22 @@ pub fn translate(meshes: &mut Vec<Mesh>, translation: glm::Vec3) {
             vertex.z += translation.z;
         }
     }
+}
+
+pub fn position(meshes: &[Mesh]) -> Vec3 {
+    let mut position = glm::vec3(0.0, 0.0, 0.0);
+    for mesh in meshes.iter() {
+        for vertex in mesh.vertices.iter() {
+            position.x += vertex.x;
+            position.y += vertex.y;
+            position.z += vertex.z;
+        }
+    }
+    let length = meshes.len() as f32 * 3.0;
+    position.x /= length;
+    position.y /= length;
+    position.z /= length;
+    position
 }
 
 pub fn scale(meshes: &mut Vec<Mesh>, scale: glm::Vec3) {

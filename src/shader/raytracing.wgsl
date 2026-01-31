@@ -26,6 +26,8 @@ const MAX_T = 1000f;
 @group(1) @binding(2) var<storage, read> materials: array<Material>;
 @group(1) @binding(3) var<storage, read> textures: array<array<f32, 3>>;
 @group(1) @binding(4) var<storage, read> surfaces: array<Surface>;
+@group(1) @binding(5) var<storage, read> lights: array<Light>;
+
 
 
 @vertex
@@ -159,6 +161,7 @@ struct Object {
     obj_type: u32,
     // for when object is has multiple meshes
     count: u32,
+    offset: u32,
 };
 
 const OBJECT_SPHERE = 0u;
@@ -209,10 +212,22 @@ struct HitRecord {
 struct Scatter {
     ray: Ray,
     attenuation: vec3<f32>,
+    type_pdf: u32,
 }
+
+struct Light {
+    // index of the object
+    id: u32,
+    // sphere or mesh
+    light_type: u32,
+}
+
+const PDF_NONE = 0u;
+const PDF_COSINE = 1u;
 
 fn hit_sphere(
     sphere_index: u32,
+    material_index: u32,
     ray: Ray,
     ray_min: f32,
     ray_max: f32,
@@ -241,7 +256,7 @@ fn hit_sphere(
     }
 
 
-    *hit = sphereIntersection(ray, sphere, root, sphere_index);
+    *hit = sphereIntersection(ray, sphere, root, material_index);
     return true;
 }
 
@@ -292,34 +307,15 @@ fn hit_triangle(
 
     let t = f * dot(e2, q);
     if t > ray_min && t < ray_max {
+        let p = ray.origin + t * ray.direction;
         let b = vec3(1.0 - u - v, u, v);
         let n = b.x * surface.normals[0].xyz + b.y * surface.normals[1].xyz + b.z * surface.normals[2].xyz;
         let front_face = dot(ray.direction, n) < 0.0;
-        *hit = HitRecord(ray.origin + t * ray.direction, normalize(n), t, material_index, front_face);
+        *hit = HitRecord(p, normalize(n), t, material_index, front_face);
         return true;
     }
 
     return false;
-}
-
-fn hit_object(
-    object_index: u32,
-    ray: Ray,
-    ray_min: f32,
-    ray_max: f32,
-    hit: ptr<function, HitRecord>,
-) -> bool {
-    switch objects[object_index].obj_type {
-        case OBJECT_SPHERE: {
-            return hit_sphere(object_index, ray, ray_min, ray_max, hit);
-        }
-        case OBJECT_MESHES: {
-            return hit_triangle(object_index, objects[object_index].id, ray, ray_min, ray_max, hit);
-        }
-        default: {
-            return false;
-        }
-    }
 }
 
 fn check_intersection(ray: Ray, intersection: ptr<function, HitRecord>) -> bool {
@@ -327,27 +323,24 @@ fn check_intersection(ray: Ray, intersection: ptr<function, HitRecord>) -> bool 
     var hit_anything = false;
     var tmp_rec = HitRecord();
 
-    var mesh_offset = 0u;
     for (var i = 0u; i < arrayLength(&objects); i += 1u) {
         let obj = objects[i];
         if obj.count > 1u {
             for (var j = 0u; j < obj.count; j += 1u) {
-                if hit_triangle(mesh_offset + i + j, obj.id, ray, MIN_T, closest_so_far, &tmp_rec) {
+                if hit_triangle(obj.offset + j, obj.id, ray, MIN_T, closest_so_far, &tmp_rec) {
                     hit_anything = true;
                     closest_so_far = tmp_rec.t;
                     *intersection = tmp_rec;
                 }
             }
-            mesh_offset += obj.count - 1u;
         } else {
-            if hit_object(i, ray, MIN_T, closest_so_far, &tmp_rec) {
+            if hit_sphere(obj.offset, i, ray, MIN_T, closest_so_far, &tmp_rec) {
                 hit_anything = true;
                 closest_so_far = tmp_rec.t;
                 *intersection = tmp_rec;
             }
         }
     }
-
     return hit_anything;
 }
 
@@ -393,21 +386,43 @@ fn ray_color(first_ray: Ray, rngState: ptr<function, u32>) -> vec3<f32> {
         // }
 
         let material = materials[intersection.material_index];
-        if material.id == MAT_DIFFUSE_LIGHT {
-            let emitted = texture_look_up(material.desc, 0.5, 0.5);
-            color_from_emission += color_from_scatter * emitted;
+        color_from_emission += color_from_scatter * emitted(material, 0.5, 0.5, intersection);
+
+        var scattered = Scatter();
+        if !scatter(&scattered, ray, intersection, material, rngState) {
             break;
         }
-        let scattered = scatter(ray, intersection, material, rngState);
+        if scattered.type_pdf == PDF_NONE {
+            color_from_scatter *= scattered.attenuation;
+            ray = scattered.ray;
+            continue;
+        }
+        scattered.ray = Ray(intersection.p, pdf_generate(rngState, intersection));
 
-        let scattering_pdf = 1.0 / (2.0 * PI);
-        let pdf = scattering_pdf;
+        scattered.ray.direction = pdf_cosine_generate(rngState, pixar_onb(intersection.normal));
+        let pdf = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
 
+        // scattered.ray.direction = pdf_light_generate(rngState, intersection.p);
+        // let pdf = pdf_light_value(intersection.p, scattered.ray.direction);
+
+        // let pdf = pdf_mixed_value(
+        //     pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal)),
+        //     pdf_light_value(intersection.p, scattered.ray.direction)
+        // );
+        // let pdf1 = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
+        // let pdf2 = pdf_light_value(intersection.p, scattered.ray.direction);
+        // let pdf = (0.5 * pdf1) + (0.5 * pdf2);
+
+        let scattering_pdf = scattering_pdf_lambertian(intersection.normal, scattered.ray.direction);
+        // let scattering_pdf = 1.0;
+        // let pdf = 1.0;
         color_from_scatter *= (scattered.attenuation * scattering_pdf) / pdf;
         ray = scattered.ray;
     }
     return color_from_emission + color_from_scatter * sky_color;
 }
+
+
 
 struct ONB {
     u: vec3<f32>,
@@ -426,31 +441,44 @@ fn pixar_onb(n: vec3<f32>) -> ONB {
     return ONB(u, v, n);
 }
 
+fn emitted(material: Material, u: f32, v: f32, hit: HitRecord) -> vec3<f32> {
+    switch (material.id) {
+        case MAT_DIFFUSE_LIGHT: {
+            if hit.front_face {
+                return texture_look_up(material.desc, u, v);
+            } else {
+                return vec3(0.0);
+            }
+        }
+        default: {
+            return vec3(0.0);
+        }
+    }
+}
 
 fn scatter(
+    s: ptr<function, Scatter>,
     ray: Ray,
     hit: HitRecord,
     material: Material,
     rngState: ptr<function, u32>,
-) -> Scatter {
+) -> bool {
     switch (material.id) 
     {
-        case MAT_LAMBERTIAN: 
+        case MAT_LAMBERTIAN:
         {
-            let onb = pixar_onb(hit.normal);
-            let cos_rnd = rng_in_cosine_hemisphere(rngState);
-            let direction = onb.u * cos_rnd.x + onb.v * cos_rnd.y + onb.w * cos_rnd.z;
-
-            let scatter = Ray(hit.p, direction);
-            let attenuation = texture_look_up(material.desc, 0.5, 0.5);
-            return Scatter(scatter, attenuation);
+            (*s).attenuation = texture_look_up(material.desc, 0.5, 0.5);
+            (*s).type_pdf = PDF_COSINE;
         }
         case MAT_METAL: 
         {
-            let reflected = reflect(normalize(ray.direction), hit.normal);
+            var reflected = reflect(ray.direction, hit.normal);
             let fuzz = material.fuzz;
-            let direction = reflected + fuzz * rng_in_unit_sphere(rngState);
-            return Scatter(Ray(hit.p, direction), texture_look_up(material.desc, 0.5, 0.5));
+            reflected = normalize(reflected) + fuzz * rng_in_unit_sphere(rngState);
+            *s = Scatter(
+                Ray(hit.p, reflected),
+                texture_look_up(material.desc, 0.5, 0.5), PDF_NONE
+            );
         }
         case MAT_DIELECTRIC: 
         {
@@ -471,14 +499,25 @@ fn scatter(
             } else {
                 direction = refract(unit_direction, hit.normal, ri);
             }
-
-
-            return Scatter(Ray(hit.p, direction), vec3(1.0));
+            *s = Scatter(
+                Ray(hit.p, direction),
+                vec3(1.0), PDF_NONE
+            );
+        }
+        case MAT_DIFFUSE_LIGHT: 
+        {
+            return false;
         }
         default: {
-            return Scatter(Ray(vec3(0.0), vec3(0.0)), vec3(0.0));
+            return false;
         }
     }
+    return true;
+}
+
+fn scattering_pdf_lambertian(normal: vec3<f32>, direction: vec3<f32>) -> f32 {
+    let cos_theta = dot(normalize(direction), normal);
+    return select(0.0, cos_theta / PI, cos_theta > 0.0);
 }
 
 fn vec3_near_zero(v: vec3<f32>) -> bool {
@@ -532,11 +571,13 @@ fn rng_on_hemisphere(rngState: ptr<function, u32>, normal: vec3<f32>) -> vec3<f3
 
 fn rng_in_cosine_hemisphere(rngState: ptr<function, u32>) -> vec3<f32> {
     let r1 = rng_next_float(rngState);
-    let r2 = rng_next_float(rngState);
+    var r2 = rng_next_float(rngState);
+
     let z = sqrt(1.0 - r2);
     let phi = 2.0 * PI * r1;
-    let x = cos(phi) * sqrt(r2);
-    let y = sin(phi) * sqrt(r2);
+    r2 = sqrt(r2);
+    let x = cos(phi) * r2;
+    let y = sin(phi) * r2;
     return vec3(x, y, z);
 }
 
@@ -574,9 +615,158 @@ fn rng_next_float_gauss(state: ptr<function, u32>) -> f32 {
     return sqrt(-2.0 * log(x1)) * cos(2.0 * PI * x2);
 }
 
+fn rng_next_float_bounded(state: ptr<function, u32>, min: f32, max: f32) -> f32 {
+    return min + rng_next_float(state) * (max - min);
+}
+
 fn rng_next_float(state: ptr<function, u32>) -> f32 {
     let x = rng_next_int(state);
     return f32(*state) / f32(0xffffffffu);
+}
+
+fn rng_next_vec3_surface(
+    state: ptr<function, u32>,
+    vertice: array<vec4<f32>, 3>
+) -> vec3<f32> {
+    let u = rng_next_float(state);
+    let v = rng_next_float(state);
+
+    let v0 = vertice[0].xyz; // corner
+    let v1 = vertice[1].xyz; // right
+    let v2 = vertice[2].xyz; // up
+
+    var point = v0 + u * (v1 - v0) + v * (v2 - v0);
+    return point;
+}
+
+fn rnd_to_sphere(radius: f32, distance_squared: f32, state: ptr<function, u32>) -> vec3<f32> {
+    let r1 = rng_next_float(state);
+    let r2 = rng_next_float(state);
+    let z = 1.0 + r2 * (sqrt(1.0 - radius * radius / distance_squared) - 1.0);
+
+    let phi = 2.0 * PI * r1;
+    let x = cos(phi) * sqrt(1.0 - z * z);
+    let y = sin(phi) * sqrt(1.0 - z * z);
+
+    return vec3(x, y, z);
+}
+
+fn area_surface(vertice: array<vec4<f32>, 3>) -> f32 {
+    let v0 = vertice[0].xyz; // corner
+    let v1 = vertice[1].xyz; // right
+    let v2 = vertice[2].xyz; // up
+
+    let e1 = v1 - v0;
+    let e2 = v2 - v0;
+
+    let c = cross(e1, e2);
+    // return (c.x * c.x + c.y * c.y + c.z * c.z) * 0.5;
+    return length(c) * 0.5;
+}
+
+fn pdf_sphere_value() -> f32 {
+    return 1 / (4 * PI);
+}
+
+fn pdf_sphere_generate(state: ptr<function, u32>) -> vec3<f32> {
+    return rng_in_unit_sphere(state);
+}
+
+fn pdf_cosine_value(direction: vec3<f32>, onb: ONB) -> f32 {
+    let cosine_theta = dot(normalize(direction), onb.w);
+    return max(cosine_theta / PI, EPSILON);
+}
+
+fn pdf_cosine_generate(state: ptr<function, u32>, onb: ONB) -> vec3<f32> {
+    let rnd_direction = rng_in_cosine_hemisphere(state);
+    return onb.u * rnd_direction.x + onb.v * rnd_direction.y + onb.w * rnd_direction.z;
+}
+
+fn pdf_light_generate(state: ptr<function, u32>, origin: vec3<f32>) -> vec3<f32> {
+    let light = lights[0];
+    switch objects[light.id].obj_type {
+        case OBJECT_SPHERE: {
+            let sphere = spheres[light.id];
+            let direction = sphere.center.xyz - origin;
+            let distance = length(direction);
+            let onb = pixar_onb(direction);
+            let rnd_direction = rnd_to_sphere(sphere.radius, distance * distance, state);
+            return onb.u * rnd_direction.x + onb.v * rnd_direction.y + onb.w * rnd_direction.z;
+        }
+        case OBJECT_MESHES: {
+            let vertices_1 = surfaces[objects[light.id].offset].vertices;
+            return rng_next_vec3_surface(state, vertices_1) - origin;
+        }
+        default: {
+            return vec3(0.0);
+        }
+    }
+}
+
+fn pdf_light_value(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+    var hit = HitRecord();
+    if !check_intersection(Ray(origin, direction), &hit) {
+        return 0.0;
+    }
+    switch objects[hit.material_index].obj_type {
+        case OBJECT_SPHERE: {
+            let light = lights[0];
+            let sphere = spheres[0];
+            let distance = sphere.center.xyz - origin;
+            let tmp = length(distance);
+
+            let l = tmp * tmp;
+            let cosine = sqrt(1.0 - sphere.radius * sphere.radius / l);
+            let solid_angle = 2.0 * PI * (1.0 - cosine);
+
+            return 1.0 / solid_angle;
+        }
+        case OBJECT_MESHES: {
+            let light = lights[0];
+            let vertices_1 = surfaces[objects[light.id].offset].vertices;
+            let area = area_surface(vertices_1) * 2.0;
+
+            let distance = hit.t * hit.t * length(direction * direction);
+            let cosine = abs(dot(direction, hit.normal) / length(direction));
+            let pdf = distance / (cosine * area);
+
+            return pdf;
+        }
+        default: {
+            return 0.0;
+        }
+    }
+}
+
+fn pdf_mixed_value(value1: f32, value2: f32) -> f32 {
+    return (0.5 * value1) + (0.5 * value2);
+}
+
+
+fn pdf_generate(
+    rngState: ptr<function, u32>,
+    hit: HitRecord,
+) -> vec3<f32> {
+    if rng_next_float(rngState) < 0.5 {
+        return pdf_cosine_generate(rngState, pixar_onb(hit.normal));
+    } else {
+        return pdf_light_generate(rngState, hit.p);
+    }
+}
+
+fn pdf_value(pdf_type: u32, direction: vec3<f32>, onb: ONB) -> f32 {
+    switch (pdf_type) {
+        case PDF_NONE: {
+            // should not happen
+            return 0.0;
+        }
+        case PDF_COSINE: {
+            return pdf_cosine_value(direction, onb);
+        }
+        default: {
+            return 0.0;
+        }
+    }
 }
 
 fn texture_look_up(desc: TextureDescriptor, x: f32, y: f32) -> vec3<f32> {

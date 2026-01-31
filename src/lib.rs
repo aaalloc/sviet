@@ -151,6 +151,18 @@ fn init(
     #[allow(deprecated)]
     let window = event_loop.create_window(attributes).unwrap();
 
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // center the window
+        let monitor = window.current_monitor();
+        let monitor = monitor.unwrap();
+        let monitor_size = monitor.size();
+        let window_size = window.inner_size();
+        let x = (monitor_size.width - window_size.width) / 2;
+        let y = (monitor_size.height - window_size.height) / 2;
+        window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+    }
+
     return (window, event_loop);
 }
 
@@ -159,7 +171,7 @@ pub async fn run() {
     info!("Starting up");
     let scale = 2.2;
     let width = 500 * scale as u32;
-    let height = 550 * scale as u32;
+    let height = 450 * scale as u32;
     let (window, event_loop) = init(width, height);
 
     let mut state = State {
