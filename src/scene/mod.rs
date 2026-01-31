@@ -125,6 +125,148 @@ impl Scene {
             object_list,
         }
     }
+    #[allow(dead_code)]
+    pub fn cornell_scene_without_suzanne(render_param: RenderParam, frame_data: FrameData) -> Self {
+        let mut materials = Vec::new();
+        let mut object_list = ObjectList::new();
+        let mut spheres = Vec::new();
+        let mut lights = Vec::new();
+
+        let red = Material::Lambertian {
+            albedo: Texture::new_from_color(glm::vec3(0.65, 0.05, 0.05)),
+        };
+        let white = Material::Lambertian {
+            albedo: Texture::new_from_color(glm::vec3(0.73, 0.73, 0.73)),
+        };
+        let green = Material::Lambertian {
+            albedo: Texture::new_from_color(glm::vec3(0.12, 0.45, 0.15)),
+        };
+        let light = Material::DiffuseLight {
+            emit: Texture::new_from_color(glm::vec3(15.0, 15.0, 15.0)),
+        };
+
+        let metal = Material::Metal {
+            albedo: Texture::new_from_color(glm::vec3(0.8, 0.85, 0.88)),
+            fuzz: 0.0,
+        };
+
+        let gold_metal = Material::Metal {
+            albedo: Texture::new_from_color(glm::vec3(0.8, 0.6, 0.2)),
+            fuzz: 0.4,
+        };
+
+        materials.push(white.clone());
+        materials.push(green);
+        materials.push(red);
+        materials.push(white.clone());
+        materials.push(white.clone());
+        materials.push(light);
+        materials.push(white.clone());
+        materials.push(metal.clone());
+        // materials.push(gold_metal);
+        materials.push(Material::Dialectric { ref_idx: 1.5 });
+
+        let mut back_wall = Mesh::quad();
+        translate(&mut back_wall, glm::vec3(0.0, 0.0, -1.0));
+        object_list.add_mesh(Some(back_wall.len()), back_wall);
+
+        let mut left_wall = Mesh::quad();
+        rotate(&mut left_wall, 90., glm::vec3(0.0, 1.0, 0.0));
+        translate(&mut left_wall, glm::vec3(-1.0, 0.0, 0.0));
+        for v in left_wall.iter_mut() {
+            v.normals = [
+                glm::vec4(0.5, 0.0, 0.0, 1.0),
+                glm::vec4(0.5, 0.0, 0.0, 1.0),
+                glm::vec4(0.5, 0.0, 0.0, 1.0),
+            ]
+        }
+        object_list.add_mesh(Some(left_wall.len()), left_wall);
+
+        let mut right_wall: Vec<Mesh> = Mesh::quad();
+        rotate(&mut right_wall, 90., glm::vec3(0.0, 1.0, 0.0));
+        translate(&mut right_wall, glm::vec3(1.0, 0.0, 0.0));
+        for v in right_wall.iter_mut() {
+            v.normals = [
+                glm::vec4(-0.5, 0.0, 0.0, 1.0),
+                glm::vec4(-0.5, 0.0, 0.0, 1.0),
+                glm::vec4(-0.5, 0.0, 0.0, 1.0),
+            ]
+        }
+        object_list.add_mesh(Some(right_wall.len()), right_wall);
+
+        let mut ceiling = Mesh::quad();
+        rotate(&mut ceiling, 90., glm::vec3(1.0, 0.0, 0.0));
+        translate(&mut ceiling, glm::vec3(0.0, 1.0, 0.0));
+        for v in ceiling.iter_mut() {
+            v.normals = [
+                glm::vec4(0.0, -0.5, 0.0, 1.0),
+                glm::vec4(0.0, -0.5, 0.0, 1.0),
+                glm::vec4(0.0, -0.5, 0.0, 1.0),
+            ]
+        }
+        object_list.add_mesh(Some(ceiling.len()), ceiling);
+
+        let mut floor = Mesh::quad();
+        rotate(&mut floor, 90., glm::vec3(1.0, 0.0, 0.0));
+        translate(&mut floor, glm::vec3(0.0, -1.0, 0.0));
+        for v in floor.iter_mut() {
+            v.normals = [
+                glm::vec4(0.0, 0.5, 0.0, 1.0),
+                glm::vec4(0.0, 0.5, 0.0, 1.0),
+                glm::vec4(0.0, 0.5, 0.0, 1.0),
+            ]
+        }
+        object_list.add_mesh(Some(floor.len()), floor);
+
+        let mut ceiling_light = Mesh::quad();
+        rotate(&mut ceiling_light, 90., glm::vec3(1.0, 0.0, 0.0));
+        translate(&mut ceiling_light, glm::vec3(0.0, 0.99, 0.));
+        scale(&mut ceiling_light, glm::vec3(0.20, 1.0, 0.2));
+        for v in ceiling_light.iter_mut() {
+            v.normals = [
+                glm::vec4(0.0, -0.5, 0.0, 1.0),
+                glm::vec4(0.0, -0.5, 0.0, 1.0),
+                glm::vec4(0.0, -0.5, 0.0, 1.0),
+            ]
+        }
+        object_list.add_mesh(Some(ceiling_light.len()), ceiling_light);
+        lights.push(Light::new(5, ObjectType::Mesh));
+
+        let mut box1 = Mesh::cube();
+        scale(&mut box1, glm::vec3(0.3, 0.3, 0.3));
+        rotate(&mut box1, 70., glm::vec3(0.0, 1.0, 0.0));
+        translate(&mut box1, glm::vec3(0.3, -0.699, 0.3));
+        object_list.add_mesh(Some(box1.len()), box1);
+
+        let mut rectangle_box = Mesh::cube();
+        scale(&mut rectangle_box, glm::vec3(0.3, 0.6, 0.3));
+        rotate(&mut rectangle_box, 15., glm::vec3(0.0, 1.0, 0.0));
+        translate(&mut rectangle_box, glm::vec3(-0.3, -0.399, -0.35));
+        object_list.add_mesh(Some(rectangle_box.len()), rectangle_box);
+
+        spheres.push(Sphere::new(glm::vec3(-0.5, -0.8, 0.3), 0.2));
+        object_list.add_sphere(None);
+
+        let camera = Camera {
+            eye_pos: glm::vec3(0.0, 0.0, 5.),
+            eye_dir: glm::vec3(0.0, 0.0, -1.0),
+            up: glm::vec3(0.0, 1.0, 0.0),
+            vfov: 30.0,
+            aperture: 0.0,
+            focus_distance: 10.0,
+        };
+
+        Self {
+            camera,
+            materials,
+            spheres,
+            lights,
+            render_param,
+            frame_data,
+            camera_controller: CameraController::new(4.0, 0.4),
+            object_list,
+        }
+    }
 
     pub fn cornell_scene(render_param: RenderParam, frame_data: FrameData) -> Self {
         let mut materials = Vec::new();

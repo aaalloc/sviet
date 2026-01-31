@@ -397,10 +397,10 @@ fn ray_color(first_ray: Ray, rngState: ptr<function, u32>) -> vec3<f32> {
             ray = scattered.ray;
             continue;
         }
-        scattered.ray = Ray(intersection.p, pdf_generate(rngState, intersection));
+        // scattered.ray = Ray(intersection.p, pdf_generate(rngState, intersection));
 
-        scattered.ray.direction = pdf_cosine_generate(rngState, pixar_onb(intersection.normal));
-        let pdf = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
+        // scattered.ray.direction = pdf_cosine_generate(rngState, pixar_onb(intersection.normal));
+        // let pdf = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
 
         // scattered.ray.direction = pdf_light_generate(rngState, intersection.p);
         // let pdf = pdf_light_value(intersection.p, scattered.ray.direction);
@@ -412,11 +412,23 @@ fn ray_color(first_ray: Ray, rngState: ptr<function, u32>) -> vec3<f32> {
         // let pdf1 = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
         // let pdf2 = pdf_light_value(intersection.p, scattered.ray.direction);
         // let pdf = (0.5 * pdf1) + (0.5 * pdf2);
+        
+        // Use Mixed Sampling (MIS)
+        let dir = pdf_generate(rngState, intersection);
+        scattered.ray = Ray(intersection.p, dir);
+        
+        let pdf = pdf_mixed_value(
+            pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal)),
+            pdf_light_value(intersection.p, scattered.ray.direction)
+        );
 
         let scattering_pdf = scattering_pdf_lambertian(intersection.normal, scattered.ray.direction);
-        // let scattering_pdf = 1.0;
-        // let pdf = 1.0;
-        color_from_scatter *= (scattered.attenuation * scattering_pdf) / pdf;
+
+        if pdf > 1e-6 {
+             color_from_scatter *= (scattered.attenuation * scattering_pdf) / pdf;
+        } else {
+             color_from_scatter = vec3(0.0);
+        }
         ray = scattered.ray;
     }
     return color_from_emission + color_from_scatter * sky_color;
@@ -610,8 +622,9 @@ fn rng_next_int(state: ptr<function, u32>) -> u32 {
 }
 
 fn rng_next_float_gauss(state: ptr<function, u32>) -> f32 {
-    let x1 = rng_next_float(state);
+    var x1 = rng_next_float(state);
     let x2 = rng_next_float(state);
+    if (x1 < 1e-6) { x1 = 1e-6; }
     return sqrt(-2.0 * log(x1)) * cos(2.0 * PI * x2);
 }
 
@@ -683,10 +696,13 @@ fn pdf_cosine_generate(state: ptr<function, u32>, onb: ONB) -> vec3<f32> {
 }
 
 fn pdf_light_generate(state: ptr<function, u32>, origin: vec3<f32>) -> vec3<f32> {
+    if (arrayLength(&lights) == 0u) { return vec3(0.0, 1.0, 0.0); }
     let light = lights[0];
-    switch objects[light.id].obj_type {
+    let obj = objects[light.id];
+
+    switch obj.obj_type {
         case OBJECT_SPHERE: {
-            let sphere = spheres[light.id];
+            let sphere = spheres[obj.offset];
             let direction = sphere.center.xyz - origin;
             let distance = length(direction);
             let onb = pixar_onb(direction);
@@ -694,42 +710,67 @@ fn pdf_light_generate(state: ptr<function, u32>, origin: vec3<f32>) -> vec3<f32>
             return onb.u * rnd_direction.x + onb.v * rnd_direction.y + onb.w * rnd_direction.z;
         }
         case OBJECT_MESHES: {
-            let vertices_1 = surfaces[objects[light.id].offset].vertices;
-            return rng_next_vec3_surface(state, vertices_1) - origin;
+            let triangle_idx = u32(rng_next_float(state) * f32(obj.count));
+            let vertices = surfaces[obj.offset + triangle_idx].vertices;
+            let p = rng_next_vec3_surface(state, vertices);
+            return normalize(p - origin);
         }
         default: {
-            return vec3(0.0);
+            return vec3(0.0, 1.0, 0.0);
         }
     }
 }
 
 fn pdf_light_value(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
-    var hit = HitRecord();
-    if !check_intersection(Ray(origin, direction), &hit) {
-        return 0.0;
-    }
-    switch objects[hit.material_index].obj_type {
-        case OBJECT_SPHERE: {
-            let light = lights[0];
-            let sphere = spheres[0];
-            let distance = sphere.center.xyz - origin;
-            let tmp = length(distance);
+    let light_len = arrayLength(&lights);
+    if (light_len == 0u) { return 0.0; }
 
-            let l = tmp * tmp;
-            let cosine = sqrt(1.0 - sphere.radius * sphere.radius / l);
-            let solid_angle = 2.0 * PI * (1.0 - cosine);
+    let light = lights[0];
+    let obj = objects[light.id];
+    
+    var hit = HitRecord();
+    var hit_something = false;
+    var closest = MAX_T;
+
+    if (obj.obj_type == OBJECT_SPHERE) {
+         if (hit_sphere(obj.offset, light.id, Ray(origin, direction), MIN_T, MAX_T, &hit)) {
+             hit_something = true;
+         }
+    } else {
+         var tmp_rec = HitRecord();
+         for (var j = 0u; j < obj.count; j += 1u) {
+            if (hit_triangle(obj.offset + j, light.id, Ray(origin, direction), MIN_T, closest, &tmp_rec)) {
+                hit_something = true;
+                closest = tmp_rec.t;
+                hit = tmp_rec;
+            }
+         }
+    }
+
+    if (!hit_something) { return 0.0; }
+
+    switch obj.obj_type {
+        case OBJECT_SPHERE: {
+            let sphere = spheres[obj.offset];
+            let center_to_origin = origin - sphere.center.xyz;
+            let dist_sq = dot(center_to_origin, center_to_origin); 
+
+            let cos_theta_max = sqrt(1.0 - sphere.radius * sphere.radius / dist_sq);
+            let solid_angle = 2.0 * PI * (1.0 - cos_theta_max);
 
             return 1.0 / solid_angle;
         }
         case OBJECT_MESHES: {
-            let light = lights[0];
-            let vertices_1 = surfaces[objects[light.id].offset].vertices;
-            let area = area_surface(vertices_1) * 2.0;
+            // Approximation: Uses area of first triangle * count. 
+            // Correct for quads/uniform meshes.
+            let vertices = surfaces[obj.offset].vertices;
+            let area = area_surface(vertices) * f32(obj.count);
 
-            let distance = hit.t * hit.t * length(direction * direction);
+            let dist_sq = hit.t * hit.t * dot(direction, direction);
             let cosine = abs(dot(direction, hit.normal) / length(direction));
-            let pdf = distance / (cosine * area);
-
+            
+            if (cosine < 1e-6) { return 0.0; }
+            let pdf = dist_sq / (cosine * area);
             return pdf;
         }
         default: {
