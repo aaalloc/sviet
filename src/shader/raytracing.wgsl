@@ -675,9 +675,9 @@ fn rng_in_unit_sphere(state: ptr<function, u32>) -> vec3<f32> {
 }
 
 fn rng_in_unit_disk(state: ptr<function, u32>) -> vec2<f32> {
-    var x = rng_next_float(state);
-    var y = rng_next_float(state);
-    return vec2(2.0 * x - 1.0, 2.0 * y - 1.0);
+    let r = sqrt(rng_next_float(state));
+    let theta = 2.0 * PI * rng_next_float(state);
+    return vec2(r * cos(theta), r * sin(theta));
 }
 
 fn rng_next_int(state: ptr<function, u32>) -> u32 {
