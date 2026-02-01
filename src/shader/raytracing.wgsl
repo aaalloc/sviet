@@ -27,6 +27,32 @@ const MAX_T = 1000f;
 @group(1) @binding(3) var<storage, read> textures: array<array<f32, 3>>;
 @group(1) @binding(4) var<storage, read> surfaces: array<Surface>;
 @group(1) @binding(5) var<storage, read> lights: array<Light>;
+@group(1) @binding(6) var<storage, read> bvh_nodes: array<BvhNode>;
+
+struct BvhNode {
+    min_x: f32,
+    min_y: f32,
+    min_z: f32,
+    data: u32, // Left child idx or primitive idx
+    max_x: f32,
+    max_y: f32,
+    max_z: f32,
+    count: u32, // 0 for internal, >0 for leaf
+};
+
+fn hit_aabb(min_p: vec3<f32>, max_p: vec3<f32>, ray: Ray, t_min: f32, t_max: f32) -> bool {
+    let inv_d = 1.0 / ray.direction;
+    let t0 = (min_p - ray.origin) * inv_d;
+    let t1 = (max_p - ray.origin) * inv_d;
+
+    let t_small = min(t0, t1);
+    let t_big = max(t0, t1);
+
+    let tmin = max(t_min, max(t_small.x, max(t_small.y, t_small.z)));
+    let tmax = min(t_max, min(t_big.x, min(t_big.y, t_big.z)));
+
+    return tmin <= tmax;
+}
 
 
 
@@ -181,6 +207,8 @@ struct Sphere {
 struct Surface {
     vertices: array<vec4<f32>, 3>,
     normals: array<vec4<f32>, 3>,
+    material_index: u32,
+    padding: array<u32, 3>,
 };
 
 const MAT_LAMBERTIAN = 0u;
@@ -227,7 +255,6 @@ const PDF_COSINE = 1u;
 
 fn hit_sphere(
     sphere_index: u32,
-    material_index: u32,
     ray: Ray,
     ray_min: f32,
     ray_max: f32,
@@ -256,7 +283,7 @@ fn hit_sphere(
     }
 
 
-    *hit = sphereIntersection(ray, sphere, root, material_index);
+    *hit = sphereIntersection(ray, sphere, root, sphere.material_index);
     return true;
 }
 
@@ -273,7 +300,6 @@ fn sphereIntersection(ray: Ray, sphere: Sphere, t: f32, material_index: u32) -> 
 
 fn hit_triangle(
     triangle_index: u32,
-    material_index: u32,
     ray: Ray,
     ray_min: f32,
     ray_max: f32,
@@ -311,7 +337,7 @@ fn hit_triangle(
         let b = vec3(1.0 - u - v, u, v);
         let n = b.x * surface.normals[0].xyz + b.y * surface.normals[1].xyz + b.z * surface.normals[2].xyz;
         let front_face = dot(ray.direction, n) < 0.0;
-        *hit = HitRecord(p, normalize(n), t, material_index, front_face);
+        *hit = HitRecord(p, normalize(n), t, surface.material_index, front_face);
         return true;
     }
 
@@ -323,21 +349,63 @@ fn check_intersection(ray: Ray, intersection: ptr<function, HitRecord>) -> bool 
     var hit_anything = false;
     var tmp_rec = HitRecord();
 
-    for (var i = 0u; i < arrayLength(&objects); i += 1u) {
-        let obj = objects[i];
-        if obj.count > 1u {
-            for (var j = 0u; j < obj.count; j += 1u) {
-                if hit_triangle(obj.offset + j, obj.id, ray, MIN_T, closest_so_far, &tmp_rec) {
-                    hit_anything = true;
-                    closest_so_far = tmp_rec.t;
-                    *intersection = tmp_rec;
+    // Stack for BVH traversal
+    var stack: array<u32, 32>;
+    var stack_ptr = 0u;
+    
+    // Start with root (0)
+    // Only traverse if we have nodes
+    let node_count = arrayLength(&bvh_nodes);
+    if (node_count > 0u) {
+        stack[stack_ptr] = 0u;
+        stack_ptr++;
+    }
+
+    while (stack_ptr > 0u) {
+        stack_ptr--;
+        let node_idx = stack[stack_ptr];
+        let node = bvh_nodes[node_idx];
+
+        let min_p = vec3<f32>(node.min_x, node.min_y, node.min_z);
+        let max_p = vec3<f32>(node.max_x, node.max_y, node.max_z);
+        
+        if (hit_aabb(min_p, max_p, ray, MIN_T, closest_so_far)) {
+            if (node.count > 0u) {
+                // Leaf
+                // Data has type and primitive index
+                // High bit = type (0 sphere, 1 mesh)
+                // 31 bits = index
+                let type_bit = node.data >> 31u;
+                let idx = node.data & 0x7FFFFFFFu;
+                
+                if (type_bit == 0u) { // Sphere
+                   if (hit_sphere(idx, ray, MIN_T, closest_so_far, &tmp_rec)) {
+                        hit_anything = true;
+                        closest_so_far = tmp_rec.t;
+                        *intersection = tmp_rec;
+                   }
+                } else { // Mesh/Triangle
+                    if (hit_triangle(idx, ray, MIN_T, closest_so_far, &tmp_rec)) {
+                        hit_anything = true;
+                        closest_so_far = tmp_rec.t;
+                        *intersection = tmp_rec;
+                    }
                 }
-            }
-        } else {
-            if hit_sphere(obj.offset, i, ray, MIN_T, closest_so_far, &tmp_rec) {
-                hit_anything = true;
-                closest_so_far = tmp_rec.t;
-                *intersection = tmp_rec;
+                
+            } else {
+                // Internal
+                let left_idx = node_idx + 1u;
+                let right_idx = node.data;
+
+                // Push children
+                if (right_idx < node_count) {
+                    stack[stack_ptr] = right_idx;
+                    stack_ptr++;
+                }
+                if (left_idx < node_count) {
+                    stack[stack_ptr] = left_idx;
+                    stack_ptr++;
+                }
             }
         }
     }
@@ -733,13 +801,13 @@ fn get_pdf_for_light(light_idx: u32, origin: vec3<f32>, direction: vec3<f32>) ->
     var closest = MAX_T;
 
     if (obj.obj_type == OBJECT_SPHERE) {
-         if (hit_sphere(obj.offset, light.id, Ray(origin, direction), MIN_T, MAX_T, &hit)) {
+         if (hit_sphere(obj.offset, Ray(origin, direction), MIN_T, MAX_T, &hit)) {
              hit_something = true;
          }
     } else {
          var tmp_rec = HitRecord();
          for (var j = 0u; j < obj.count; j += 1u) {
-            if (hit_triangle(obj.offset + j, light.id, Ray(origin, direction), MIN_T, closest, &tmp_rec)) {
+            if (hit_triangle(obj.offset + j, Ray(origin, direction), MIN_T, closest, &tmp_rec)) {
                 hit_something = true;
                 closest = tmp_rec.t;
                 hit = tmp_rec;

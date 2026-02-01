@@ -1,3 +1,4 @@
+pub mod bvh;
 mod egui_tools;
 mod gpu_buffer;
 pub use egui_tools::EguiRenderer;

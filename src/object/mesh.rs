@@ -1,14 +1,28 @@
 use glm::Vec3;
 
+use crate::utils::bvh::{Aabb, Bounded};
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 // TODO: For the moment, vec4 for padding, include manually
 pub struct Mesh {
     pub vertices: [glm::Vec4; 3],
     pub normals: [glm::Vec4; 3],
+    pub material_idx: u32,
+    pub _padding: [u32; 3],
 }
 
 impl Mesh {
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            vertices: [glm::vec4(0.0, 0.0, 0.0, 0.0); 3],
+            normals: [glm::vec4(0.0, 0.0, 0.0, 0.0); 3],
+            material_idx: 0,
+            _padding: [0; 3],
+        }
+    }
+
     #[allow(dead_code)]
     pub fn square() -> Vec<Mesh> {
         vec![
@@ -23,6 +37,8 @@ impl Mesh {
                     glm::vec4(0.0, 0.0, 0.0, 1.0),
                     glm::vec4(0.0, 0.0, 0.0, 1.0),
                 ],
+                material_idx: 0,
+                _padding: [0; 3],
             },
             Mesh {
                 vertices: [
@@ -35,6 +51,8 @@ impl Mesh {
                     glm::vec4(0.0, 0.0, 0.0, 1.0),
                     glm::vec4(0.0, 0.0, 0.0, 1.0),
                 ],
+                material_idx: 0,
+                _padding: [0; 3],
             },
         ]
     }
@@ -52,6 +70,8 @@ impl Mesh {
                     glm::vec4(0.0, 0.0, 0.5, 1.0),
                     glm::vec4(0.0, 0.0, 0.5, 1.0),
                 ],
+                material_idx: 0,
+                _padding: [0; 3],
             },
             Mesh {
                 vertices: [
@@ -64,15 +84,10 @@ impl Mesh {
                     glm::vec4(0.0, 0.0, 0.5, 1.0),
                     glm::vec4(0.0, 0.0, 0.5, 1.0),
                 ],
+                material_idx: 0,
+                _padding: [0; 3],
             },
         ]
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            vertices: [glm::vec4(0.0, 0.0, 0.0, 0.0); 3],
-            normals: [glm::vec4(0.0, 0.0, 0.0, 0.0); 3],
-        }
     }
 
     pub fn cube() -> Vec<Mesh> {
@@ -157,10 +172,8 @@ impl Mesh {
         meshes
     }
 
-    #[allow(dead_code)]
     pub fn from_tobj(tobj: tobj::Model) -> Vec<Mesh> {
         let mesh = &tobj.mesh;
-        println!("Positions: {:?}", mesh.positions.len());
         let vertices = mesh
             .positions
             .chunks(3)
@@ -184,40 +197,25 @@ impl Mesh {
                 normals[c[1] as usize],
                 normals[c[2] as usize],
             ],
+            material_idx: 0,
+            _padding: [0; 3],
         });
         indices.collect()
     }
 }
 
-pub fn center_surface(meshes: &Vec<Mesh>) -> Vec3 {
-    let mut min = glm::vec3(f32::MAX, f32::MAX, f32::MAX);
-    let mut max = glm::vec3(f32::MIN, f32::MIN, f32::MIN);
-    for mesh in meshes.iter() {
-        for vertex in mesh.vertices.iter() {
-            min.x = min.x.min(vertex.x);
-            min.y = min.y.min(vertex.y);
-            min.z = min.z.min(vertex.z);
-            max.x = max.x.max(vertex.x);
-            max.y = max.y.max(vertex.y);
-            max.z = max.z.max(vertex.z);
-        }
-    }
-    let center = (min + max) / 2.0;
-    center
-}
+impl Bounded for Mesh {
+    fn aabb(&self) -> Aabb {
+        let v0: Vec3 = self.vertices[0].xyz();
+        let v1: Vec3 = self.vertices[1].xyz();
+        let v2: Vec3 = self.vertices[2].xyz();
 
-pub fn area(meshes: &Vec<Mesh>) -> f32 {
-    let mut area = 0.0;
-    for mesh in meshes.iter() {
-        let a = glm::vec3(mesh.vertices[0].x, mesh.vertices[0].y, mesh.vertices[0].z);
-        let b = glm::vec3(mesh.vertices[1].x, mesh.vertices[1].y, mesh.vertices[1].z);
-        let c = glm::vec3(mesh.vertices[2].x, mesh.vertices[2].y, mesh.vertices[2].z);
-        let ab = b - a;
-        let ac = c - a;
-        let cross = glm::cross(&ab, &ac);
-        area += glm::length(&cross) / 2.0;
+        let mut aabb = Aabb::empty();
+        aabb.grow(v0);
+        aabb.grow(v1);
+        aabb.grow(v2);
+        aabb
     }
-    area
 }
 
 pub fn rotate(meshes: &mut Vec<Mesh>, angle: f32, axis: glm::Vec3) {
@@ -250,22 +248,6 @@ pub fn translate(meshes: &mut Vec<Mesh>, translation: glm::Vec3) {
             vertex.z += translation.z;
         }
     }
-}
-
-pub fn position(meshes: &[Mesh]) -> Vec3 {
-    let mut position = glm::vec3(0.0, 0.0, 0.0);
-    for mesh in meshes.iter() {
-        for vertex in mesh.vertices.iter() {
-            position.x += vertex.x;
-            position.y += vertex.y;
-            position.z += vertex.z;
-        }
-    }
-    let length = meshes.len() as f32 * 3.0;
-    position.x /= length;
-    position.y /= length;
-    position.z /= length;
-    position
 }
 
 pub fn scale(meshes: &mut Vec<Mesh>, scale: glm::Vec3) {
