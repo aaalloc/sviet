@@ -12,6 +12,7 @@ const EPSILON = 0.0001f;
 const PI = 3.1415927f;
 const FRAC_1_PI = 0.31830987f;
 const FRAC_PI_2 = 1.5707964f;
+const THRESHOLD = 1e-6f;
 
 const MIN_T = 0.001f;
 const MAX_T = 1000f;
@@ -465,22 +466,7 @@ fn ray_color(first_ray: Ray, rngState: ptr<function, u32>) -> vec3<f32> {
             ray = scattered.ray;
             continue;
         }
-        // scattered.ray = Ray(intersection.p, pdf_generate(rngState, intersection));
 
-        // scattered.ray.direction = pdf_cosine_generate(rngState, pixar_onb(intersection.normal));
-        // let pdf = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
-
-        // scattered.ray.direction = pdf_light_generate(rngState, intersection.p);
-        // let pdf = pdf_light_value(intersection.p, scattered.ray.direction);
-
-        // let pdf = pdf_mixed_value(
-        //     pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal)),
-        //     pdf_light_value(intersection.p, scattered.ray.direction)
-        // );
-        // let pdf1 = pdf_cosine_value(scattered.ray.direction, pixar_onb(intersection.normal));
-        // let pdf2 = pdf_light_value(intersection.p, scattered.ray.direction);
-        // let pdf = (0.5 * pdf1) + (0.5 * pdf2);
-        
         // Use Mixed Sampling (MIS)
         let dir = pdf_generate(rngState, intersection);
         scattered.ray = Ray(intersection.p, dir);
@@ -492,7 +478,7 @@ fn ray_color(first_ray: Ray, rngState: ptr<function, u32>) -> vec3<f32> {
 
         let scattering_pdf = scattering_pdf_lambertian(intersection.normal, scattered.ray.direction);
 
-        if pdf > 1e-6 {
+        if pdf > THRESHOLD {
              color_from_scatter *= (scattered.attenuation * scattering_pdf) / pdf;
         } else {
              color_from_scatter = vec3(0.0);
@@ -692,7 +678,7 @@ fn rng_next_int(state: ptr<function, u32>) -> u32 {
 fn rng_next_float_gauss(state: ptr<function, u32>) -> f32 {
     var x1 = rng_next_float(state);
     let x2 = rng_next_float(state);
-    if (x1 < 1e-6) { x1 = 1e-6; }
+    if (x1 < THRESHOLD) { x1 = THRESHOLD; }
     return sqrt(-2.0 * log(x1)) * cos(2.0 * PI * x2);
 }
 
@@ -837,7 +823,7 @@ fn get_pdf_for_light(light_idx: u32, origin: vec3<f32>, direction: vec3<f32>) ->
             let dist_sq = hit.t * hit.t * dot(direction, direction);
             let cosine = abs(dot(direction, hit.normal) / length(direction));
             
-            if (cosine < 1e-6) { return 0.0; }
+            if (cosine < THRESHOLD) { return 0.0; }
             let pdf = dist_sq / (cosine * area);
             return pdf;
         }
