@@ -53,7 +53,6 @@ impl PartialEq for Scene {
 }
 
 impl Scene {
-    #[allow(dead_code)]
     pub fn raytracing_scene_oneweek(render_param: RenderParam, frame_data: FrameData) -> Self {
         let mut spheres = Vec::new();
         let mut materials = Vec::new();
@@ -158,7 +157,6 @@ impl Scene {
             object_list,
         }
     }
-    #[allow(dead_code)]
     pub fn cornell_scene_without_suzanne(render_param: RenderParam, frame_data: FrameData) -> Self {
         let mut materials = Vec::new();
         let mut object_list = ObjectList::new();
@@ -421,7 +419,6 @@ impl Scene {
             triangulate: true,
             ..Default::default()
         };
-        println!("Current path: {:?}", std::env::current_dir().unwrap());
 
         let s = tobj::load_obj(path_str, &options).unwrap().0[0].clone();
 

@@ -612,46 +612,40 @@ impl<'a> RenderContext<'a> {
                     // slider for changing the max samples per pixel
                     ui.horizontal(|ui| {
                         ui.label("Max samples per pixel:");
-                        ui.add(
-                            egui::Slider::new(
-                                &mut self.scene.render_param.samples_max_per_pixel,
-                                1..=10000,
-                            )
-                            .text("max samples"),
-                        );
+                        ui.add(egui::Slider::new(
+                            &mut self.scene.render_param.samples_max_per_pixel,
+                            1..=10000,
+                        ));
                     });
 
                     // slider for changing the max depth of the ray
                     ui.horizontal(|ui| {
                         ui.label("Max depth:");
-                        ui.add(
-                            egui::Slider::new(&mut self.scene.render_param.max_depth, 1..=100)
-                                .text("depth"),
-                        );
+                        ui.add(egui::Slider::new(
+                            &mut self.scene.render_param.max_depth,
+                            1..=100,
+                        ));
                     });
 
                     ui.separator();
 
                     ui.horizontal(|ui| {
                         ui.label("Field of view:");
-                        ui.add(
-                            egui::Slider::new(&mut self.scene.camera.vfov, 2.0..=179.0).text("fov"),
-                        );
+                        ui.add(egui::Slider::new(&mut self.scene.camera.vfov, 2.0..=179.0));
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Aperture:");
-                        ui.add(
-                            egui::Slider::new(&mut self.scene.camera.aperture, 0.0..=1.0)
-                                .text("aperture"),
-                        );
+                        ui.add(egui::Slider::new(
+                            &mut self.scene.camera.aperture,
+                            0.0..=1.0,
+                        ));
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Focus distance:");
                         ui.add(
                             egui::Slider::new(&mut self.scene.camera.focus_distance, 0.0..=100.0)
-                                .text("focus distance")
                                 .step_by(0.1),
                         );
                     });
@@ -678,23 +672,13 @@ impl<'a> RenderContext<'a> {
                     ui.label(format!("Up vector: {:?}", self.scene.camera.up));
                 });
 
-            // egui::Window::new("Object scene")
-            //     .vscroll(true)
-            //     .default_open(false)
-            //     .collapsible(true)
-            //     .show(self.egui_renderer.context(), |ui| {
-            //         let l = (self.scene.object_list.objects.len() - 1) as u32;
-            //         let index = self.scene.object_list.object_hashmap.get(&l).unwrap();
-            //         let slice_monkey =
-            //             &self.scene.object_list.meshes[index.0 as usize..index.1 as usize];
-
-            //         ui.label("Objects:");
-            //         ui.label(format!(
-            //             "Monkey info: {:?}",
-            //             self.scene.object_list.object_hashmap.get(&l)
-            //         ));
-            //         ui.label(format!("Position: {:?}", position(slice_monkey)));
-            //     });
+            egui::Window::new("Object scene")
+                .vscroll(true)
+                .default_open(false)
+                .collapsible(true)
+                .show(self.egui_renderer.context(), |ui| {
+                    self.scene.object_list.ui(ui);
+                });
 
             self.egui_renderer.end_frame_and_draw(
                 &self.device,

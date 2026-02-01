@@ -172,10 +172,8 @@ impl Mesh {
         meshes
     }
 
-    #[allow(dead_code)]
     pub fn from_tobj(tobj: tobj::Model) -> Vec<Mesh> {
         let mesh = &tobj.mesh;
-        println!("Positions: {:?}", mesh.positions.len());
         let vertices = mesh
             .positions
             .chunks(3)

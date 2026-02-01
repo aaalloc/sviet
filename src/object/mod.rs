@@ -91,6 +91,19 @@ impl ObjectList {
             Some(meshes),
         );
     }
+
+    pub fn ui(&self, ui: &mut egui::Ui) {
+        ui.heading("Objects");
+        ui.separator();
+        for object in &self.objects {
+            ui.horizontal(|ui| {
+                ui.label(format!("ID: {}", object.id));
+                ui.label(format!("Type: {:?}", ObjectType::from(object.obj_type)));
+                ui.label(format!("Count: {}", object.count));
+                ui.label(format!("Offset: {}", object.offset));
+            });
+        }
+    }
 }
 
 impl Object {
