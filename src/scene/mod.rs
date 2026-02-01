@@ -108,7 +108,7 @@ impl Scene {
         let objects: Vec<Object> = spheres
             .iter()
             .enumerate()
-            .map(|(i, _)| Object::new(i as u32, object::ObjectType::Sphere, None, None))
+            .map(|(i, _)| Object::new(i as u32, object::ObjectType::Sphere, None, Some(i as u32)))
             .collect();
 
         object_list.objects = objects;

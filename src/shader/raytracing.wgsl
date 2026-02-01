@@ -696,8 +696,11 @@ fn pdf_cosine_generate(state: ptr<function, u32>, onb: ONB) -> vec3<f32> {
 }
 
 fn pdf_light_generate(state: ptr<function, u32>, origin: vec3<f32>) -> vec3<f32> {
-    if (arrayLength(&lights) == 0u) { return vec3(0.0, 1.0, 0.0); }
-    let light = lights[0];
+    let light_count = arrayLength(&lights);
+    if (light_count == 0u) { return vec3(0.0, 1.0, 0.0); }
+    
+    let light_idx = min(u32(rng_next_float(state) * f32(light_count)), light_count - 1u);
+    let light = lights[light_idx];
     let obj = objects[light.id];
 
     switch obj.obj_type {
@@ -721,11 +724,8 @@ fn pdf_light_generate(state: ptr<function, u32>, origin: vec3<f32>) -> vec3<f32>
     }
 }
 
-fn pdf_light_value(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
-    let light_len = arrayLength(&lights);
-    if (light_len == 0u) { return 0.0; }
-
-    let light = lights[0];
+fn get_pdf_for_light(light_idx: u32, origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+    let light = lights[light_idx];
     let obj = objects[light.id];
     
     var hit = HitRecord();
@@ -777,6 +777,18 @@ fn pdf_light_value(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
             return 0.0;
         }
     }
+}
+
+fn pdf_light_value(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+    let light_len = arrayLength(&lights);
+    if (light_len == 0u) { return 0.0; }
+
+    var sum_pdf = 0.0;
+    for (var i = 0u; i < light_len; i += 1u) {
+        sum_pdf += get_pdf_for_light(i, origin, direction);
+    }
+
+    return sum_pdf / f32(light_len);
 }
 
 fn pdf_mixed_value(value1: f32, value2: f32) -> f32 {
