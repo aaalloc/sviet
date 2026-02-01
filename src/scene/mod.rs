@@ -8,6 +8,28 @@ use crate::object::{
     self, rotate, scale, translate, Light, Mesh, Object, ObjectList, ObjectType, Sphere,
 };
 
+pub type SceneCreator = fn(RenderParam, FrameData) -> Scene;
+
+pub struct SceneDescriptor {
+    pub name: &'static str,
+    pub creator: SceneCreator,
+}
+
+pub const AVAILABLE_SCENES: &[SceneDescriptor] = &[
+    SceneDescriptor {
+        name: "Raytracing One Week",
+        creator: Scene::raytracing_scene_oneweek,
+    },
+    SceneDescriptor {
+        name: "Cornell Box",
+        creator: Scene::cornell_scene,
+    },
+    SceneDescriptor {
+        name: "Cornell Box (No Suzanne)",
+        creator: Scene::cornell_scene_without_suzanne,
+    },
+];
+
 #[derive(Clone, Debug)]
 pub struct Scene {
     pub materials: Vec<Material>,

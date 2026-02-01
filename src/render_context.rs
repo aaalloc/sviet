@@ -6,7 +6,7 @@ use winit::{
 };
 
 use crate::{
-    scene::{GpuCamera, GpuMaterial, Scene},
+    scene::{GpuCamera, GpuMaterial, Scene, AVAILABLE_SCENES},
     utils::{EguiRenderer, StorageBuffer, UniformBuffer, Vertex},
 };
 
@@ -25,6 +25,8 @@ pub struct RenderContext<'a> {
     camera_buffer: UniformBuffer,
     render_param_buffer: UniformBuffer,
     frame_data_buffer: UniformBuffer,
+    scene_bind_group_layout: wgpu::BindGroupLayout,
+    current_scene_index: usize,
     scene_bind_group: wgpu::BindGroup,
     scene: Scene,
     latest_scene: Scene,
@@ -56,6 +58,104 @@ const VERTICES: &[Vertex] = &[
 ];
 
 const VERTICES_LEN: usize = VERTICES.len();
+
+fn create_scene_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let mut entries = Vec::new();
+    for i in 0..7 {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: i,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+    }
+
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        entries: &entries,
+        label: Some("scene layout"),
+    })
+}
+
+fn create_scene_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    scene: &Scene,
+) -> wgpu::BindGroup {
+    let objects_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(scene.object_list.objects.as_slice()),
+        0_u32,
+        Some("objects buffer"),
+    );
+
+    let sphere_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(scene.spheres.as_slice()),
+        1_u32,
+        Some("sphere buffer"),
+    );
+
+    let mut global_texture_data = Vec::new();
+    let mut material_data: Vec<GpuMaterial> = Vec::with_capacity(scene.materials.len());
+    for material in scene.materials.iter() {
+        material_data.push(GpuMaterial::new(material, &mut global_texture_data));
+    }
+
+    let material_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(material_data.as_slice()),
+        2_u32,
+        Some("material buffer"),
+    );
+
+    let texture_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(global_texture_data.as_slice()),
+        3_u32,
+        Some("texture buffer"),
+    );
+
+    let surfaces_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(scene.object_list.meshes.as_slice()),
+        4_u32,
+        Some("surfaces buffer"),
+    );
+
+    let lights_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(scene.lights.as_slice()),
+        5_u32,
+        Some("lights buffer"),
+    );
+
+    let bvh_nodes = crate::utils::bvh::build_bvh_flat(&scene.spheres, &scene.object_list.meshes);
+
+    let bvh_buffer = StorageBuffer::new_from_bytes(
+        device,
+        bytemuck::cast_slice(bvh_nodes.as_slice()),
+        6_u32,
+        Some("bvh buffer"),
+    );
+
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout,
+        entries: &[
+            objects_buffer.binding(),
+            sphere_buffer.binding(),
+            material_buffer.binding(),
+            texture_buffer.binding(),
+            surfaces_buffer.binding(),
+            lights_buffer.binding(),
+            bvh_buffer.binding(),
+        ],
+        label: Some("scene bind group"),
+    })
+}
 
 impl<'a> RenderContext<'a> {
     pub async fn new(window: &'a Window, scene: &Scene) -> RenderContext<'a> {
@@ -185,95 +285,8 @@ impl<'a> RenderContext<'a> {
             label: Some("image bind group"),
         });
 
-        let (scene_bind_group_layout, scene_bind_group) = {
-            let objects_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(scene.object_list.objects.as_slice()),
-                0_u32,
-                Some("objects buffer"),
-            );
-
-            let sphere_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(scene.spheres.as_slice()),
-                1_u32,
-                Some("sphere buffer"),
-            );
-
-            let mut global_texture_data = Vec::new();
-            let mut material_data: Vec<GpuMaterial> = Vec::with_capacity(scene.materials.len());
-            for material in scene.materials.iter() {
-                material_data.push(GpuMaterial::new(material, &mut global_texture_data));
-            }
-
-            let material_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(material_data.as_slice()),
-                2_u32,
-                Some("material buffer"),
-            );
-
-            let texture_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(global_texture_data.as_slice()),
-                3_u32,
-                Some("texture buffer"),
-            );
-
-            let surfaces_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(scene.object_list.meshes.as_slice()),
-                4_u32,
-                Some("surfaces buffer"),
-            );
-
-            let lights_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(scene.lights.as_slice()),
-                5_u32,
-                Some("lights buffer"),
-            );
-
-            let bvh_nodes =
-                crate::utils::bvh::build_bvh_flat(&scene.spheres, &scene.object_list.meshes);
-
-            let bvh_buffer = StorageBuffer::new_from_bytes(
-                &device,
-                bytemuck::cast_slice(bvh_nodes.as_slice()),
-                6_u32,
-                Some("bvh buffer"),
-            );
-
-            let scene_bind_group_layout =
-                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    entries: &[
-                        objects_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                        sphere_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                        material_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                        texture_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                        surfaces_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                        lights_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                        bvh_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                    ],
-                    label: Some("scene layout"),
-                });
-
-            let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &scene_bind_group_layout,
-                entries: &[
-                    objects_buffer.binding(),
-                    sphere_buffer.binding(),
-                    material_buffer.binding(),
-                    texture_buffer.binding(),
-                    surfaces_buffer.binding(),
-                    lights_buffer.binding(),
-                    bvh_buffer.binding(),
-                ],
-                label: Some("scene bind group"),
-            });
-
-            (scene_bind_group_layout, scene_bind_group)
-        };
+        let scene_bind_group_layout = create_scene_bind_group_layout(&device);
+        let scene_bind_group = create_scene_bind_group(&device, &scene_bind_group_layout, scene);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader/raytracing.wgsl"));
 
@@ -381,6 +394,8 @@ impl<'a> RenderContext<'a> {
             camera_buffer,
             frame_data_buffer,
             render_param_buffer,
+            scene_bind_group_layout,
+            current_scene_index: 0,
             scene_bind_group,
             scene: scene.clone(),
             latest_scene: scene.clone(),
@@ -434,6 +449,13 @@ impl<'a> RenderContext<'a> {
         self.scene
             .camera_controller
             .handle_mouse(event, mouse_pressed);
+    }
+
+    fn rebuild_scene(&mut self) {
+        self.scene_bind_group =
+            create_scene_bind_group(&self.device, &self.scene_bind_group_layout, &self.scene);
+        self.scene.render_param.total_samples = 0;
+        self.scene.frame_data.index = 0;
     }
 
     pub fn update(&mut self, dt: std::time::Duration) {
@@ -551,13 +573,36 @@ impl<'a> RenderContext<'a> {
 
         {
             self.egui_renderer.begin_frame(&self.window);
+            let ctx = self.egui_renderer.context().clone();
 
             egui::Window::new("Params")
                 // .resizable(true)
                 .vscroll(true)
                 .default_open(false)
                 .collapsible(true)
-                .show(self.egui_renderer.context(), |ui| {
+                .show(&ctx, |ui| {
+                    egui::ComboBox::from_label("Scene")
+                        .selected_text(AVAILABLE_SCENES[self.current_scene_index].name)
+                        .show_ui(ui, |ui| {
+                            for (i, scene_desc) in AVAILABLE_SCENES.iter().enumerate() {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.current_scene_index,
+                                        i,
+                                        scene_desc.name,
+                                    )
+                                    .clicked()
+                                {
+                                    let new_scene = (scene_desc.creator)(
+                                        self.scene.render_param.clone(),
+                                        self.scene.frame_data.clone(),
+                                    );
+                                    self.scene = new_scene;
+                                    self.rebuild_scene();
+                                }
+                            }
+                        });
+
                     // ui.label("Label!");
 
                     // if ui.button("Button!").clicked() {
