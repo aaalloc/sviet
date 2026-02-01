@@ -6,7 +6,6 @@ use winit::{
 };
 
 use crate::{
-    object::position,
     scene::{GpuCamera, GpuMaterial, Scene},
     utils::{EguiRenderer, StorageBuffer, UniformBuffer, Vertex},
 };
@@ -235,6 +234,16 @@ impl<'a> RenderContext<'a> {
                 Some("lights buffer"),
             );
 
+            let bvh_nodes =
+                crate::utils::bvh::build_bvh_flat(&scene.spheres, &scene.object_list.meshes);
+
+            let bvh_buffer = StorageBuffer::new_from_bytes(
+                &device,
+                bytemuck::cast_slice(bvh_nodes.as_slice()),
+                6_u32,
+                Some("bvh buffer"),
+            );
+
             let scene_bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     entries: &[
@@ -244,6 +253,7 @@ impl<'a> RenderContext<'a> {
                         texture_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
                         surfaces_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
                         lights_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
+                        bvh_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
                     ],
                     label: Some("scene layout"),
                 });
@@ -257,6 +267,7 @@ impl<'a> RenderContext<'a> {
                     texture_buffer.binding(),
                     surfaces_buffer.binding(),
                     lights_buffer.binding(),
+                    bvh_buffer.binding(),
                 ],
                 label: Some("scene bind group"),
             });

@@ -5,8 +5,7 @@ mod material;
 pub use material::{GpuMaterial, Material, Texture};
 
 use crate::object::{
-    self, area, center_surface, rotate, scale, translate, Light, Mesh, Object, ObjectList,
-    ObjectType, Sphere,
+    self, rotate, scale, translate, Light, Mesh, Object, ObjectList, ObjectType, Sphere,
 };
 
 #[derive(Clone, Debug)]
@@ -44,7 +43,7 @@ impl Scene {
         };
 
         materials.push(ground_material);
-        spheres.push(Sphere::new(glm::vec3(0.0, -1000.0, 0.0), 1000.0));
+        spheres.push(Sphere::new(glm::vec3(0.0, -1000.0, 0.0), 1000.0, 0));
 
         for (a, b) in (-11..11).flat_map(|a| (-11..11).map(move |b| (a, b))) {
             let choose_mat = rand::random::<f32>();
@@ -77,24 +76,36 @@ impl Scene {
                 };
 
                 materials.push(sphere_material);
-                spheres.push(Sphere::new(center, 0.2));
+                spheres.push(Sphere::new(center, 0.2, (materials.len() - 1) as u32));
             }
         }
 
-        spheres.push(Sphere::new(glm::vec3(0.0, 1.0, 0.0), 1.0));
         materials.push(Material::Dialectric { ref_idx: 1.5 });
+        spheres.push(Sphere::new(
+            glm::vec3(0.0, 1.0, 0.0),
+            1.0,
+            (materials.len() - 1) as u32,
+        ));
 
-        spheres.push(Sphere::new(glm::vec3(-4.0, 1.0, 0.0), 1.0));
         materials.push(Material::DiffuseLight {
             emit: Texture::new_from_color(glm::vec3(10.0, 10.0, 10.0)),
         });
+        spheres.push(Sphere::new(
+            glm::vec3(-4.0, 1.0, 0.0),
+            1.0,
+            (materials.len() - 1) as u32,
+        ));
         lights.push(Light::new(spheres.len() as u32 - 1, ObjectType::Sphere));
 
-        spheres.push(Sphere::new(glm::vec3(4.0, 1.0, 0.0), 1.0));
         materials.push(Material::Metal {
             albedo: Texture::new_from_color(glm::vec3(0.7, 0.6, 0.5)),
             fuzz: 0.0,
         });
+        spheres.push(Sphere::new(
+            glm::vec3(4.0, 1.0, 0.0),
+            1.0,
+            (materials.len() - 1) as u32,
+        ));
 
         let camera = Camera {
             eye_pos: glm::vec3(-10.5, 2.73, -5.83),
@@ -148,11 +159,6 @@ impl Scene {
         let metal = Material::Metal {
             albedo: Texture::new_from_color(glm::vec3(0.8, 0.85, 0.88)),
             fuzz: 0.0,
-        };
-
-        let gold_metal = Material::Metal {
-            albedo: Texture::new_from_color(glm::vec3(0.8, 0.6, 0.2)),
-            fuzz: 0.4,
         };
 
         materials.push(white.clone());
@@ -244,7 +250,7 @@ impl Scene {
         translate(&mut rectangle_box, glm::vec3(-0.3, -0.399, -0.35));
         object_list.add_mesh(Some(rectangle_box.len()), rectangle_box);
 
-        spheres.push(Sphere::new(glm::vec3(-0.5, -0.8, 0.3), 0.2));
+        spheres.push(Sphere::new(glm::vec3(-0.5, -0.8, 0.3), 0.2, 8));
         object_list.add_sphere(None);
 
         let camera = Camera {
@@ -404,7 +410,7 @@ impl Scene {
         translate(&mut sdsd, glm::vec3(0.3, -0.30, 0.3));
         object_list.add_mesh(Some(sdsd.len()), sdsd);
 
-        spheres.push(Sphere::new(glm::vec3(-0.5, -0.8, 0.3), 0.2));
+        spheres.push(Sphere::new(glm::vec3(-0.5, -0.8, 0.3), 0.2, 9));
         object_list.add_sphere(None);
         let camera = Camera {
             eye_pos: glm::vec3(0.0, 0.0, 5.),
@@ -420,49 +426,6 @@ impl Scene {
             materials,
             spheres,
             lights,
-            render_param,
-            frame_data,
-            camera_controller: CameraController::new(4.0, 0.4),
-            object_list,
-        }
-    }
-
-    pub fn teapot_scene(render_param: RenderParam, frame_data: FrameData) -> Self {
-        let mut materials = Vec::new();
-        let mut object_list = ObjectList::new();
-
-        let ground_material = Material::Lambertian {
-            albedo: Texture::new_from_color(glm::vec3(0.5, 0.5, 0.5)),
-        };
-
-        materials.push(ground_material);
-
-        let path_str = "teapot.obj";
-        let options = tobj::LoadOptions {
-            triangulate: true,
-            ..Default::default()
-        };
-        println!("Current path: {:?}", std::env::current_dir().unwrap());
-
-        let s = tobj::load_obj(path_str, &options).unwrap().0[0].clone();
-
-        let meshes = Mesh::from_tobj(s);
-        object_list.add_mesh(Some(meshes.len()), meshes);
-
-        let camera = Camera {
-            eye_pos: glm::vec3(0.0, 0.0, 6.6),
-            eye_dir: glm::vec3(0.0, 0.0, -1.0),
-            up: glm::vec3(0.0, 1.0, 0.0),
-            vfov: 20.0,
-            aperture: 0.0,
-            focus_distance: 1.0,
-        };
-
-        Self {
-            camera,
-            materials,
-            spheres: vec![Sphere::empty()],
-            lights: vec![Light::empty()],
             render_param,
             frame_data,
             camera_controller: CameraController::new(4.0, 0.4),

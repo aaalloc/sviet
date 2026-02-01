@@ -55,7 +55,10 @@ impl ObjectList {
         }
         self.objects.push(obj);
         self.counter += 1;
-        if let Some(mesh) = meshes {
+        if let Some(mut mesh) = meshes {
+            mesh.iter_mut().for_each(|m| {
+                m.material_idx = obj.id;
+            });
             mesh.iter().for_each(|m| self.meshes.push(*m));
 
             self.object_hashmap.insert(
@@ -102,7 +105,7 @@ impl Object {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ObjectType {
     Sphere = 0,
     Mesh = 1,
@@ -130,13 +133,6 @@ impl Light {
         Light {
             id,
             light_type: light_type as u32,
-        }
-    }
-
-    pub fn empty() -> Self {
-        Light {
-            id: 0xFFFFFFFF,
-            light_type: 0,
         }
     }
 }
