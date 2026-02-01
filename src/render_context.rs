@@ -10,6 +10,8 @@ use crate::{
     utils::{EguiRenderer, StorageBuffer, UniformBuffer, Vertex},
 };
 
+use egui::{special_emojis::GITHUB, Hyperlink};
+
 pub struct RenderContext<'a> {
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
@@ -678,6 +680,20 @@ impl<'a> RenderContext<'a> {
                 .collapsible(true)
                 .show(self.egui_renderer.context(), |ui| {
                     self.scene.object_list.ui(ui);
+                });
+
+            // #[cfg(target_arch = "wasm32")]
+            egui::Window::new("About")
+                .default_open(true)
+                .collapsible(true)
+                .show(self.egui_renderer.context(), |ui| {
+                    ui.heading("Sviet");
+                    ui.label("A Pathracer built with wgpu and Rust. ");
+                    ui.add_space(10.0);
+                    ui.add(Hyperlink::from_label_and_url(
+                        format!("{GITHUB} github.com/aaalloc/sviet"),
+                        "https://github.com/aaalloc/sviet",
+                    ));
                 });
 
             self.egui_renderer.end_frame_and_draw(

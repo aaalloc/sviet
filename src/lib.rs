@@ -169,9 +169,37 @@ fn init(
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub async fn run() {
     info!("Starting up");
-    let scale = 2.2;
-    let width = 1000 * scale as u32;
-    let height = 450 * scale as u32;
+
+    #[cfg(target_arch = "wasm32")]
+    let (width, height) = {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().expect("Window not found");
+        let document = window.document().expect("Document not found");
+        let canvas = document
+            .get_element_by_id("pathracer-canvas")
+            .expect("Canvas not found");
+        let canvas: web_sys::HtmlCanvasElement =
+            canvas.dyn_into().expect("Element is not a canvas");
+
+        let display_width = canvas.client_width() as u32;
+        let display_height = canvas.client_height() as u32;
+
+        let device_pixel_ratio = window.device_pixel_ratio();
+        let render_width = (display_width as f64 * device_pixel_ratio) as u32;
+        let render_height = (display_height as f64 * device_pixel_ratio) as u32;
+
+        canvas.set_width(render_width);
+        canvas.set_height(render_height);
+
+        (render_width, render_height)
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let (width, height) = {
+        let scale = 2.2;
+        ((1000.0 * scale) as u32, (450.0 * scale) as u32)
+    };
+
     let (window, event_loop) = init(width, height);
 
     let mut state = State {
@@ -181,11 +209,12 @@ pub async fn run() {
         last_time: instant::Instant::now(),
         render_context: RenderContext::new(
             &window,
-            &Scene::raytracing_scene_oneweek(
+            // TODO: not sync with current_scene_index
+            &Scene::cornell_scene_without_suzanne(
                 scene::RenderParam {
                     samples_per_pixel: 1,
-                    max_depth: 30,
-                    samples_max_per_pixel: 1000,
+                    max_depth: 15,
+                    samples_max_per_pixel: 200,
                     total_samples: 0,
                     clear_samples: 0,
                 },

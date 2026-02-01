@@ -17,16 +17,16 @@ pub struct SceneDescriptor {
 
 pub const AVAILABLE_SCENES: &[SceneDescriptor] = &[
     SceneDescriptor {
-        name: "Raytracing One Week",
-        creator: Scene::raytracing_scene_oneweek,
+        name: "Cornell Box (No Suzanne)",
+        creator: Scene::cornell_scene_without_suzanne,
     },
     SceneDescriptor {
-        name: "Cornell Box",
+        name: "Cornell Box (with Suzanne, a bit heavy)",
         creator: Scene::cornell_scene,
     },
     SceneDescriptor {
-        name: "Cornell Box (No Suzanne)",
-        creator: Scene::cornell_scene_without_suzanne,
+        name: "Raytracing One Week (heavy scene)",
+        creator: Scene::raytracing_scene_oneweek,
     },
 ];
 
@@ -414,13 +414,18 @@ impl Scene {
 
         object_list.add_mesh(Some(rectangle_box.len()), rectangle_box);
 
-        let path_str = "assets/mesh/suzanne.obj";
+        let mesh_bytes = include_bytes!("../../assets/mesh/suzanne.obj");
         let options = tobj::LoadOptions {
             triangulate: true,
             ..Default::default()
         };
 
-        let s = tobj::load_obj(path_str, &options).unwrap().0[0].clone();
+        let s = tobj::load_obj_buf(&mut std::io::Cursor::new(mesh_bytes), &options, |_| {
+            Ok(Default::default())
+        })
+        .unwrap()
+        .0[0]
+            .clone();
 
         let mut sdsd = Mesh::from_tobj(s);
         scale(&mut sdsd, glm::vec3(0.2, 0.2, 0.2));

@@ -42,7 +42,8 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Window",
     "Element",
-    "GpuCanvasContext"
+    "GpuCanvasContext",
+    "HtmlCanvasElement"
 ]}
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 
