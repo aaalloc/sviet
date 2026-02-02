@@ -7,32 +7,29 @@ Built with wgpu, winit, egui
 
 Currently in work in progress
 
-[Raytracer the rest of your life](https://raytracing.github.io/books/RayTracingTheRestOfYourLife.html) is partially implemented.
-I currently have some issue about PDF light sampling.
-
-Loading model also works but need more enhancement to be able to apply translation/rotation/scaling at runtime
-
-When all of that will be done next step will be to implement PBR material.
+Implemented :
+- [Raytracer the rest of your life](https://raytracing.github.io/books/RayTracingTheRestOfYourLife.html)
+- BVH is also implemeted
+- Model loading
 
 ![prev](image/raytracer_oneweekend.png)
 ![](image/cornell_box_suzanne.png)
 ![](image/raytracer_oneweekend_night.png)
+<img width="2838" height="1734" alt="image" src="https://github.com/user-attachments/assets/bba566c7-6d66-48a3-8382-03cb2732db03" />
 
-## Build to WASM
 
+## WASM
+web demo : https://yanovskyy.com/wasm/sviet
+
+### dev
 ```
 cargo install trunk
 trunk build --features webgpu
 trunk serve --features webgpu
 ```
 
-<!-- Will not work currently
+### compile
 ```
-wasm-pack build --target web pathracer-wgpu
-``` -->
+wasm-pack build -t web --no-typescript --release --out-name sviet
+```
 
-## Run to web
-
-### NextJS project
-
-TODO
