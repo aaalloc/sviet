@@ -146,10 +146,10 @@ impl CameraController {
                     self.process_mouse(delta.0, delta.1);
                 }
             }
-            DeviceEvent::MouseWheel { delta } => {
-                // TODO: Not behaving as expected
-                self.process_scroll(delta);
-            }
+            // DeviceEvent::MouseWheel { delta } => {
+            //     // TODO: Not behaving as expected
+            //     self.process_scroll(delta);
+            // }
             _ => {}
         }
     }

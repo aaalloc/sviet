@@ -34,6 +34,7 @@ pub struct RenderContext<'a> {
     latest_scene: Scene,
     pub egui_renderer: EguiRenderer,
     pub fps: f64,
+    window_focused: bool,
 }
 
 // const RGB_TRIANGLE: &[Vertex] = &[
@@ -403,6 +404,7 @@ impl<'a> RenderContext<'a> {
             latest_scene: scene.clone(),
             egui_renderer,
             fps: 0.0,
+            window_focused: true,
         }
     }
 
@@ -442,9 +444,24 @@ impl<'a> RenderContext<'a> {
 
     pub fn window_event(&mut self, event: &WindowEvent, mouse_pressed: &mut bool) {
         self.egui_renderer.handle_input(self.window, event);
-        self.scene
-            .camera_controller
-            .handle_input(event, mouse_pressed);
+
+        match event {
+            WindowEvent::Focused(focused) => {
+                self.window_focused = *focused;
+            }
+            WindowEvent::KeyboardInput { .. } => {
+                if self.window_focused {
+                    self.scene
+                        .camera_controller
+                        .handle_input(event, mouse_pressed);
+                }
+            }
+            _ => {
+                self.scene
+                    .camera_controller
+                    .handle_input(event, mouse_pressed);
+            }
+        }
     }
 
     pub fn device_event(&mut self, event: &DeviceEvent, mouse_pressed: bool) {
@@ -577,123 +594,175 @@ impl<'a> RenderContext<'a> {
             self.egui_renderer.begin_frame(&self.window);
             let ctx = self.egui_renderer.context().clone();
 
-            egui::Window::new("Params")
-                // .resizable(true)
-                .vscroll(true)
-                .default_open(false)
-                .collapsible(true)
+            egui::SidePanel::left("left_panel")
+                .resizable(true)
+                .default_width(250.0)
                 .show(&ctx, |ui| {
-                    egui::ComboBox::from_label("Scene")
-                        .selected_text(AVAILABLE_SCENES[self.current_scene_index].name)
-                        .show_ui(ui, |ui| {
-                            for (i, scene_desc) in AVAILABLE_SCENES.iter().enumerate() {
-                                if ui
-                                    .selectable_value(
-                                        &mut self.current_scene_index,
-                                        i,
-                                        scene_desc.name,
-                                    )
-                                    .clicked()
-                                {
-                                    let new_scene = (scene_desc.creator)(
-                                        self.scene.render_param.clone(),
-                                        self.scene.frame_data.clone(),
+                    ui.heading("Menu");
+                    ui.separator();
+                    ui.set_max_width(240.0);
+
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.label(format!(
+                                "Total samples: {}",
+                                self.scene.render_param.total_samples
+                            ));
+                            ui.label(format!(
+                                "Max samples: {}",
+                                self.scene.render_param.samples_max_per_pixel
+                            ));
+                            ui.label(format!("FPS: {:.2}", self.fps));
+
+                            ui.separator();
+
+                            egui::CollapsingHeader::new("About")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.heading("Sviet");
+                                    ui.label("A Pathracer built with wgpu and Rust. ");
+                                    ui.add_space(10.0);
+                                    ui.add(Hyperlink::from_label_and_url(
+                                        format!("{GITHUB} github.com/aaalloc/sviet"),
+                                        "https://github.com/aaalloc/sviet",
+                                    ));
+
+                                    ui.separator();
+                                    ui.heading("Camera Controls");
+                                    ui.separator();
+
+                                    ui.label("Right Mouse Button + Move: Rotate camera");
+
+                                    ui.separator();
+                                    ui.heading("Keyboard Controls");
+                                    ui.separator();
+
+                                    ui.label("W / Arrow Up: Move forward");
+                                    ui.label("S / Arrow Down: Move backward");
+                                    ui.label("A / Arrow Left: Move left");
+                                    ui.label("D / Arrow Right: Move right");
+                                    ui.label("Space: Move up");
+                                    ui.label("Shift: Move down");
+
+                                    ui.separator();
+                                    ui.heading("Window Status");
+                                    ui.separator();
+
+                                    match self.window_focused {
+                                        false => {
+                                            ui.colored_label(
+                                                egui::Color32::YELLOW,
+                                                "Click on the window to enable keyboard input",
+                                            );
+                                        }
+                                        true => {
+                                            ui.colored_label(
+                                                egui::Color32::LIGHT_GREEN,
+                                                "Keyboard input is enabled",
+                                            );
+                                        }
+                                    }
+                                });
+
+                            ui.separator();
+
+                            egui::CollapsingHeader::new("Params")
+                                .default_open(false)
+                                .show(ui, |ui| {
+                                    egui::ComboBox::from_label("Scene")
+                                        .selected_text(
+                                            AVAILABLE_SCENES[self.current_scene_index].name,
+                                        )
+                                        .show_ui(ui, |ui| {
+                                            for (i, scene_desc) in
+                                                AVAILABLE_SCENES.iter().enumerate()
+                                            {
+                                                if ui
+                                                    .selectable_value(
+                                                        &mut self.current_scene_index,
+                                                        i,
+                                                        scene_desc.name,
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    let new_scene = (scene_desc.creator)(
+                                                        self.scene.render_param.clone(),
+                                                        self.scene.frame_data.clone(),
+                                                    );
+                                                    self.scene = new_scene;
+                                                    self.rebuild_scene();
+                                                }
+                                            }
+                                        });
+
+                                    ui.separator();
+
+                                    ui.label("Max samples per pixel:");
+                                    ui.add(egui::Slider::new(
+                                        &mut self.scene.render_param.samples_max_per_pixel,
+                                        1..=10000,
+                                    ));
+
+                                    ui.separator();
+
+                                    ui.label("Max depth:");
+                                    ui.add(egui::Slider::new(
+                                        &mut self.scene.render_param.max_depth,
+                                        1..=100,
+                                    ));
+
+                                    ui.separator();
+
+                                    ui.label("Field of view:");
+                                    ui.add(egui::Slider::new(
+                                        &mut self.scene.camera.vfov,
+                                        2.0..=179.0,
+                                    ));
+
+                                    ui.separator();
+
+                                    ui.label("Aperture:");
+                                    ui.add(egui::Slider::new(
+                                        &mut self.scene.camera.aperture,
+                                        0.0..=1.0,
+                                    ));
+
+                                    ui.separator();
+
+                                    ui.label("Focus distance:");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.scene.camera.focus_distance,
+                                            0.0..=100.0,
+                                        )
+                                        .step_by(0.1),
                                     );
-                                    self.scene = new_scene;
-                                    self.rebuild_scene();
-                                }
-                            }
+
+                                    ui.separator();
+
+                                    ui.label("Camera:");
+                                    ui.label(format!(
+                                        "Eye direction: {:?}",
+                                        self.scene.camera.eye_dir
+                                    ));
+                                    ui.label(format!(
+                                        "Eye position: {:?}",
+                                        self.scene.camera.eye_pos
+                                    ));
+                                    ui.label(format!("Up vector: {:?}", self.scene.camera.up));
+                                });
+
+                            ui.separator();
+
+                            egui::CollapsingHeader::new("Object Scene")
+                                .default_open(false)
+                                .show(ui, |ui| {
+                                    self.scene.object_list.ui(ui);
+                                });
+
+                            ui.separator();
                         });
-
-                    // ui.label("Label!");
-
-                    // if ui.button("Button!").clicked() {
-                    //     println!("boom!")
-                    // }
-
-                    // slider for changing the max samples per pixel
-                    ui.horizontal(|ui| {
-                        ui.label("Max samples per pixel:");
-                        ui.add(egui::Slider::new(
-                            &mut self.scene.render_param.samples_max_per_pixel,
-                            1..=10000,
-                        ));
-                    });
-
-                    // slider for changing the max depth of the ray
-                    ui.horizontal(|ui| {
-                        ui.label("Max depth:");
-                        ui.add(egui::Slider::new(
-                            &mut self.scene.render_param.max_depth,
-                            1..=100,
-                        ));
-                    });
-
-                    ui.separator();
-
-                    ui.horizontal(|ui| {
-                        ui.label("Field of view:");
-                        ui.add(egui::Slider::new(&mut self.scene.camera.vfov, 2.0..=179.0));
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Aperture:");
-                        ui.add(egui::Slider::new(
-                            &mut self.scene.camera.aperture,
-                            0.0..=1.0,
-                        ));
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Focus distance:");
-                        ui.add(
-                            egui::Slider::new(&mut self.scene.camera.focus_distance, 0.0..=100.0)
-                                .step_by(0.1),
-                        );
-                    });
-
-                    ui.separator();
-
-                    ui.horizontal(|ui| {
-                        ui.label(format!(
-                            "Total samples: {}",
-                            self.scene.render_param.total_samples
-                        ));
-                        ui.label(format!(
-                            "Max samples: {}",
-                            self.scene.render_param.samples_max_per_pixel
-                        ));
-                        ui.label(format!("FPS: {:.2}", self.fps));
-                    });
-                    ui.separator();
-
-                    // camera information
-                    ui.label("Camera:");
-                    ui.label(format!("Eye direction: {:?}", self.scene.camera.eye_dir));
-                    ui.label(format!("Eye position: {:?}", self.scene.camera.eye_pos));
-                    ui.label(format!("Up vector: {:?}", self.scene.camera.up));
-                });
-
-            egui::Window::new("Object scene")
-                .vscroll(true)
-                .default_open(false)
-                .collapsible(true)
-                .show(self.egui_renderer.context(), |ui| {
-                    self.scene.object_list.ui(ui);
-                });
-
-            // #[cfg(target_arch = "wasm32")]
-            egui::Window::new("About")
-                .default_open(true)
-                .collapsible(true)
-                .show(self.egui_renderer.context(), |ui| {
-                    ui.heading("Sviet");
-                    ui.label("A Pathracer built with wgpu and Rust. ");
-                    ui.add_space(10.0);
-                    ui.add(Hyperlink::from_label_and_url(
-                        format!("{GITHUB} github.com/aaalloc/sviet"),
-                        "https://github.com/aaalloc/sviet",
-                    ));
                 });
 
             self.egui_renderer.end_frame_and_draw(
