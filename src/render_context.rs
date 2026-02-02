@@ -623,10 +623,23 @@ impl<'a> RenderContext<'a> {
                                     ui.heading("Sviet");
                                     ui.label("A Pathracer built with wgpu and Rust. ");
                                     ui.add_space(10.0);
-                                    ui.add(Hyperlink::from_label_and_url(
+
+                                    let hyper_link = ui.add(Hyperlink::from_label_and_url(
                                         format!("{GITHUB} github.com/aaalloc/sviet"),
                                         "https://github.com/aaalloc/sviet",
                                     ));
+
+                                    if hyper_link.clicked() {
+                                        #[cfg(target_arch = "wasm32")]
+                                        {
+                                            if let Some(window) = web_sys::window() {
+                                                let _ = window.open_with_url_and_target(
+                                                    "https://github.com/aaalloc/sviet",
+                                                    "_blank",
+                                                );
+                                            }
+                                        }
+                                    }
 
                                     ui.separator();
                                     ui.heading("Camera Controls");
